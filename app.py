@@ -1,6 +1,6 @@
 import streamlit as st
 
-st.title("📄 AI PDF Chatbot")
+st.title(" AI PDF Chatbot")
 st.write("Upload your PDF and ask questions")
 
 # Upload PDF
@@ -13,7 +13,6 @@ if uploaded_file is not None:
     st.success("PDF uploaded successfully!")
 
 if user_question:
-    st.write("🤖 Answer:")
+    st.write(" Answer:")
     st.write("This is where AI response will come")
 
-    
