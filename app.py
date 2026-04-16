@@ -1,9 +1,8 @@
 import streamlit as st
-from langchain_community.llms import Ollama
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import CharacterTextSplitter
 from langchain_community.vectorstores import FAISS
-from langchain_community.embeddings import OllamaEmbeddings
+from langchain_community.embeddings import HuggingFaceEmbeddings
 
 st.set_page_config(page_title="Document Intelligence Tool", layout="wide")
 
@@ -33,8 +32,6 @@ p {
 st.markdown("<h1> Document Intelligence Tool</h1>", unsafe_allow_html=True)
 st.markdown("<p>Upload a document and extract insights instantly</p>", unsafe_allow_html=True)
 
-llm = Ollama(model="llama3")
-
 if "db" not in st.session_state:
     st.session_state.db = None
 
@@ -56,7 +53,10 @@ if uploaded_file and st.session_state.db is None:
         splitter = CharacterTextSplitter(chunk_size=500, chunk_overlap=50)
         texts = splitter.split_documents(docs)
 
-        embeddings = OllamaEmbeddings(model="llama3")
+        embeddings = HuggingFaceEmbeddings(
+            model_name="all-MiniLM-L6-v2"
+        )
+
         db = FAISS.from_documents(texts, embeddings)
 
         st.session_state.db = db
@@ -72,17 +72,7 @@ if question:
         docs = st.session_state.db.similarity_search(question, k=4)
         context = " ".join([doc.page_content for doc in docs])
 
-        prompt = f"""
-Answer using the document below.
-
-Document:
-{context}
-
-Question:
-{question}
-"""
-
-        answer = llm.invoke(prompt)
+        answer = f"Answer based on document:\\n\\n{context[:500]}..."
 
         st.session_state.history.append({
             "question": question,
