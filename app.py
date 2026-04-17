@@ -33,12 +33,15 @@ h1 {
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown("<h1>📄 AI PDF Chatbot</h1>", unsafe_allow_html=True)
+st.markdown("<h1> AI PDF Chatbot</h1>", unsafe_allow_html=True)
 
-# ✅ Load model (FIXED)
+#  Load better QA model
 @st.cache_resource
 def load_model():
-    return pipeline("text-generation", model="gpt2")
+    return pipeline(
+        "text2text-generation",
+        model="google/flan-t5-small"
+    )
 
 qa_pipeline = load_model()
 
@@ -50,7 +53,7 @@ if "history" not in st.session_state:
     st.session_state.history = []
 
 # Upload PDF
-st.subheader("📤 Upload your PDF")
+st.subheader("Upload your PDF")
 uploaded_file = st.file_uploader("Upload PDF", type="pdf")
 
 if uploaded_file and st.session_state.db is None:
@@ -71,10 +74,10 @@ if uploaded_file and st.session_state.db is None:
         db = FAISS.from_documents(texts, embeddings)
         st.session_state.db = db
 
-    st.success("✅ Document ready!")
+    st.success("Document ready!")
 
 # Ask question
-st.subheader("💬 Ask Questions")
+st.subheader("Ask Questions")
 question = st.text_input("Type your question...")
 
 if question:
@@ -95,15 +98,15 @@ Question:
 Answer:
 """
             response = qa_pipeline(prompt, max_length=200)
-            answer = response[0]["generated_text"].replace(prompt, "").strip()
+            answer = response[0]["generated_text"].strip()
 
         st.session_state.history.append((question, answer))
     else:
-        st.warning("⚠️ Please upload a PDF first")
+        st.warning("Please upload a PDF first")
 
 # Chat history
 if st.session_state.history:
-    st.subheader("🧠 Chat History")
+    st.subheader("Chat History")
 
     for q, a in reversed(st.session_state.history):
         st.markdown(f"<div class='chat-box'><span class='user'>You:</span> {q}</div>", unsafe_allow_html=True)
