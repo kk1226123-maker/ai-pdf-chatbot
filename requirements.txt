@@ -1,7 +1,8 @@
 streamlit
 langchain
 langchain-community
-langchain-ollama
 faiss-cpu
 pypdf
+transformers
+torch
 sentence-transformers

@@ -3,9 +3,12 @@ from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import CharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain_community.embeddings import HuggingFaceEmbeddings
+from transformers import pipeline
 
+# Page config
 st.set_page_config(page_title="Document Intelligence Tool", layout="wide")
 
+# Styling
 st.markdown("""
 <style>
 .main {
@@ -29,17 +32,26 @@ p {
 </style>
 """, unsafe_allow_html=True)
 
+# Title
 st.markdown("<h1> Document Intelligence Tool</h1>", unsafe_allow_html=True)
 st.markdown("<p>Upload a document and extract insights instantly</p>", unsafe_allow_html=True)
 
+# Session state
 if "db" not in st.session_state:
     st.session_state.db = None
 
 if "history" not in st.session_state:
     st.session_state.history = []
 
-st.subheader(" Upload Document")
+# Load lightweight LLM
+@st.cache_resource
+def load_model():
+    return pipeline("text2text-generation", model="google/flan-t5-base")
 
+qa_pipeline = load_model()
+
+# Upload section
+st.subheader(" Upload Document")
 uploaded_file = st.file_uploader("Upload PDF", type="pdf")
 
 if uploaded_file and st.session_state.db is None:
@@ -58,13 +70,12 @@ if uploaded_file and st.session_state.db is None:
         )
 
         db = FAISS.from_documents(texts, embeddings)
-
         st.session_state.db = db
 
     st.success("Document processed successfully")
 
+# Question section
 st.subheader(" Ask a Question")
-
 question = st.text_input("Enter your question")
 
 if question:
@@ -72,7 +83,19 @@ if question:
         docs = st.session_state.db.similarity_search(question, k=4)
         context = " ".join([doc.page_content for doc in docs])
 
-        answer = f"Answer based on document:\\n\\n{context[:500]}..."
+        with st.spinner("Thinking..."):
+            prompt = f"""
+            Answer the question based only on the context below.
+
+            Context:
+            {context}
+
+            Question:
+            {question}
+            """
+
+            response = qa_pipeline(prompt, max_length=200)
+            answer = response[0]["generated_text"]
 
         st.session_state.history.append({
             "question": question,
@@ -82,6 +105,7 @@ if question:
     else:
         st.warning("Please upload a document first")
 
+# Show history
 if st.session_state.history:
     st.subheader(" Previous Questions")
 
