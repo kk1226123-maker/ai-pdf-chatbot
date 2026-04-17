@@ -6,35 +6,41 @@ from langchain_community.embeddings import HuggingFaceEmbeddings
 from transformers import pipeline
 
 # Page config
-st.set_page_config(page_title="Document Intelligence Tool", layout="wide")
+st.set_page_config(page_title="AI PDF Chatbot", layout="wide")
 
-# Styling
+# UI Styling
 st.markdown("""
 <style>
 .main {
     background-color: #0E1117;
 }
 h1 {
+    text-align: center;
     color: white;
-    text-align: center;
 }
-p {
-    text-align: center;
-    color: #A0A0A0;
+.chat-box {
+    background-color: #1c1f26;
+    padding: 10px;
+    border-radius: 10px;
+    margin-bottom: 10px;
 }
-.question {
-    font-weight: bold;
-    margin-top: 15px;
+.user {
+    color: #4CAF50;
 }
-.answer {
-    margin-bottom: 20px;
+.bot {
+    color: #00BFFF;
 }
 </style>
 """, unsafe_allow_html=True)
 
-# Title
-st.markdown("<h1> Document Intelligence Tool</h1>", unsafe_allow_html=True)
-st.markdown("<p>Upload a document and extract insights instantly</p>", unsafe_allow_html=True)
+st.markdown("<h1>📄 AI PDF Chatbot</h1>", unsafe_allow_html=True)
+
+# ✅ Load model (FIXED)
+@st.cache_resource
+def load_model():
+    return pipeline("text-generation", model="gpt2")
+
+qa_pipeline = load_model()
 
 # Session state
 if "db" not in st.session_state:
@@ -43,19 +49,12 @@ if "db" not in st.session_state:
 if "history" not in st.session_state:
     st.session_state.history = []
 
-# Load lightweight LLM
-@st.cache_resource
-def load_model():
-    return pipeline("text2text-generation", model="google/flan-t5-base")
-
-qa_pipeline = load_model()
-
-# Upload section
-st.subheader(" Upload Document")
+# Upload PDF
+st.subheader("📤 Upload your PDF")
 uploaded_file = st.file_uploader("Upload PDF", type="pdf")
 
 if uploaded_file and st.session_state.db is None:
-    with st.spinner("Analyzing document..."):
+    with st.spinner("Processing document..."):
         with open("temp.pdf", "wb") as f:
             f.write(uploaded_file.read())
 
@@ -72,11 +71,11 @@ if uploaded_file and st.session_state.db is None:
         db = FAISS.from_documents(texts, embeddings)
         st.session_state.db = db
 
-    st.success("Document processed successfully")
+    st.success("✅ Document ready!")
 
-# Question section
-st.subheader(" Ask a Question")
-question = st.text_input("Enter your question")
+# Ask question
+st.subheader("💬 Ask Questions")
+question = st.text_input("Type your question...")
 
 if question:
     if st.session_state.db:
@@ -85,30 +84,27 @@ if question:
 
         with st.spinner("Thinking..."):
             prompt = f"""
-            Answer the question based only on the context below.
+Answer the question based on the context below.
 
-            Context:
-            {context}
+Context:
+{context}
 
-            Question:
-            {question}
-            """
+Question:
+{question}
 
+Answer:
+"""
             response = qa_pipeline(prompt, max_length=200)
-            answer = response[0]["generated_text"]
+            answer = response[0]["generated_text"].replace(prompt, "").strip()
 
-        st.session_state.history.append({
-            "question": question,
-            "answer": answer
-        })
-
+        st.session_state.history.append((question, answer))
     else:
-        st.warning("Please upload a document first")
+        st.warning("⚠️ Please upload a PDF first")
 
-# Show history
+# Chat history
 if st.session_state.history:
-    st.subheader(" Previous Questions")
+    st.subheader("🧠 Chat History")
 
-    for item in reversed(st.session_state.history):
-        st.markdown(f"<div class='question'>Q: {item['question']}</div>", unsafe_allow_html=True)
-        st.markdown(f"<div class='answer'>A: {item['answer']}</div>", unsafe_allow_html=True)
+    for q, a in reversed(st.session_state.history):
+        st.markdown(f"<div class='chat-box'><span class='user'>You:</span> {q}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='chat-box'><span class='bot'>AI:</span> {a}</div>", unsafe_allow_html=True)
