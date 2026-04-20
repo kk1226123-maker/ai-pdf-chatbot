@@ -3,23 +3,30 @@ from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import CharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain_community.embeddings import HuggingFaceEmbeddings
+from transformers import pipeline
 
 # Page config
 st.set_page_config(page_title="AI PDF Chatbot", layout="wide")
 
 st.title(" AI PDF Chatbot")
 
+#  Load lightweight model (no errors)
+@st.cache_resource
+def load_model():
+    return pipeline("text-generation", model="google/flan-t5-small")
+
+qa_pipeline = load_model()
+
 # Session state
 if "db" not in st.session_state:
     st.session_state.db = None
-
 if "history" not in st.session_state:
     st.session_state.history = []
 
 # Upload PDF
 uploaded_file = st.file_uploader("Upload your PDF", type="pdf")
 
-if uploaded_file:
+if uploaded_file and st.session_state.db is None:
     with st.spinner("Processing document..."):
         with open("temp.pdf", "wb") as f:
             f.write(uploaded_file.read())
@@ -27,49 +34,50 @@ if uploaded_file:
         loader = PyPDFLoader("temp.pdf")
         docs = loader.load()
 
-        splitter = CharacterTextSplitter(chunk_size=600, chunk_overlap=100)
+        splitter = CharacterTextSplitter(chunk_size=400, chunk_overlap=50)
         texts = splitter.split_documents(docs)
 
-        embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-        db = FAISS.from_documents(texts, embeddings)
+        embeddings = HuggingFaceEmbeddings(
+            model_name="all-MiniLM-L6-v2"
+        )
 
+        db = FAISS.from_documents(texts, embeddings)
         st.session_state.db = db
 
     st.success("Document ready!")
 
 # Ask question
-question = st.text_input("Ask a question about the document")
-
-def extract_answer(question, docs):
-    question_words = question.lower().split()
-    best_chunks = []
-
-    for doc in docs:
-        text = doc.page_content.lower()
-        score = sum(word in text for word in question_words)
-
-        if score > 0:
-            best_chunks.append((score, doc.page_content))
-
-    if best_chunks:
-        best_chunks.sort(reverse=True)
-        return "\n\n".join([chunk for _, chunk in best_chunks[:2]])
-
-    return docs[0].page_content
+st.subheader("Ask a question about the document")
+question = st.text_input("Type your question...")
 
 if question:
     if st.session_state.db:
-        docs = st.session_state.db.similarity_search(question, k=4)
-        answer = extract_answer(question, docs)
+        docs = st.session_state.db.similarity_search(question, k=3)
+        context = " ".join([doc.page_content for doc in docs])
 
-        st.session_state.history.append((question, answer[:700]))
+        with st.spinner("Thinking..."):
+            prompt = f"""
+
+
+Context:
+{context}
+
+Question:
+{question}
+
+Answer:
+"""
+            response = qa_pipeline(prompt, max_new_tokens=100)
+            answer = response[0]["generated_text"]
+
+        st.session_state.history.append((question, answer.strip()))
     else:
-        st.warning(" Please upload a PDF first")
+        st.warning("Please upload a PDF first")
 
 # Chat history
 if st.session_state.history:
-    st.subheader(" Chat History")
+    st.subheader("Chat History")
 
     for q, a in reversed(st.session_state.history):
-        st.markdown(f"**You:** {q}")
-        st.markdown(f"**Answer:** {a}")
+        st.write(f"**You:** {q}")
+        st.write(f"**Answer:** {a}")
