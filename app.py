@@ -1,12 +1,11 @@
 import streamlit as st
 from langchain_community.document_loaders import PyPDFLoader
-from langchain_text_splitters import CharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 
 st.set_page_config(page_title="AI PDF Chatbot", layout="wide")
-
 
 st.markdown("""
 <style>
@@ -34,7 +33,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.title(" AI PDF Chatbot")
+st.title("AI PDF Chatbot")
 
 
 @st.cache_resource
@@ -71,42 +70,45 @@ if uploaded_file and st.session_state.db is None:
         loader = PyPDFLoader("temp.pdf")
         docs = loader.load()
 
-        splitter = CharacterTextSplitter(
+        if not docs or len(docs) == 0:
+            st.error("No readable text found in PDF.")
+            st.stop()
+
+        splitter = RecursiveCharacterTextSplitter(
             chunk_size=500,
-            chunk_overlap=50
+            chunk_overlap=100
         )
+
         texts = splitter.split_documents(docs)
+
+      
+        if not texts or len(texts) == 0:
+            st.error("Could not split PDF into text chunks.")
+            st.stop()
 
         embeddings = HuggingFaceEmbeddings(
             model_name="sentence-transformers/all-MiniLM-L6-v2"
         )
 
-        db = FAISS.from_documents(texts, embeddings)
-        st.session_state.db = db
+        st.session_state.db = FAISS.from_documents(texts, embeddings)
 
-    st.sidebar.success(" Document ready!")
-
+    st.sidebar.success("Document ready!")
 
 st.markdown("<div class='chat-container'>", unsafe_allow_html=True)
 
 for msg in st.session_state.messages:
     if msg["role"] == "user":
-        st.markdown(
-            f"<div class='user-msg'>{msg['content']}</div>",
-            unsafe_allow_html=True
-        )
+        st.markdown(f"<div class='user-msg'>{msg['content']}</div>", unsafe_allow_html=True)
     else:
-        st.markdown(
-            f"<div class='bot-msg'>{msg['content']}</div>",
-            unsafe_allow_html=True
-        )
+        st.markdown(f"<div class='bot-msg'>{msg['content']}</div>", unsafe_allow_html=True)
 
 st.markdown("</div>", unsafe_allow_html=True)
+
 
 question = st.chat_input("Ask a question about your document...")
 
 if question:
-    if not st.session_state.db:
+    if st.session_state.db is None:
         st.warning("Please upload a PDF first")
     else:
         # Save user message
@@ -115,13 +117,11 @@ if question:
             "content": question
         })
 
-        # Retrieve relevant chunks
+        # Retrieve context
         docs = st.session_state.db.similarity_search(question, k=4)
         context = " ".join([doc.page_content for doc in docs])
 
-        # Prompt
         prompt = f"""
-
 Context:
 {context}
 
@@ -131,11 +131,10 @@ Question:
 Answer:
 """
 
-        # Generate answer
         with st.spinner("Thinking..."):
             answer = generate_answer(prompt)
 
-        # Save AI response
+        # Save assistant response
         st.session_state.messages.append({
             "role": "assistant",
             "content": answer
