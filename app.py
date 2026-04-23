@@ -7,35 +7,9 @@ from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 
 st.set_page_config(page_title="AI PDF Chatbot", layout="wide")
 
-st.markdown("""
-<style>
-.chat-container {
-    max-width: 800px;
-    margin: auto;
-}
+st.title(" AI PDF Chatbot")
 
-.user-msg {
-    background-color: #DCF8C6;
-    padding: 10px;
-    border-radius: 10px;
-    margin: 5px;
-    text-align: right;
-}
-
-.bot-msg {
-    background-color: #2b2b2b;
-    color: white;
-    padding: 10px;
-    border-radius: 10px;
-    margin: 5px;
-    text-align: left;
-}
-</style>
-""", unsafe_allow_html=True)
-
-st.title("AI PDF Chatbot")
-
-
+#  Load model
 @st.cache_resource
 def load_model():
     model_name = "google/flan-t5-base"
@@ -46,11 +20,12 @@ def load_model():
 tokenizer, model = load_model()
 
 def generate_answer(prompt):
-    inputs = tokenizer(prompt, return_tensors="pt", truncation=True)
-    outputs = model.generate(**inputs, max_new_tokens=200)
+    inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=512)
+    outputs = model.generate(**inputs, max_new_tokens=120)
     return tokenizer.decode(outputs[0], skip_special_tokens=True)
 
 
+# Session
 if "db" not in st.session_state:
     st.session_state.db = None
 
@@ -58,7 +33,7 @@ if "messages" not in st.session_state:
     st.session_state.messages = []
 
 
-st.sidebar.header("Upload Document")
+# Upload
 uploaded_file = st.sidebar.file_uploader("Upload PDF", type="pdf")
 
 if uploaded_file and st.session_state.db is None:
@@ -70,21 +45,12 @@ if uploaded_file and st.session_state.db is None:
         loader = PyPDFLoader("temp.pdf")
         docs = loader.load()
 
-        if not docs or len(docs) == 0:
-            st.error("No readable text found in PDF.")
-            st.stop()
-
         splitter = RecursiveCharacterTextSplitter(
-            chunk_size=500,
-            chunk_overlap=100
+            chunk_size=400,   
+            chunk_overlap=80
         )
 
         texts = splitter.split_documents(docs)
-
-      
-        if not texts or len(texts) == 0:
-            st.error("Could not split PDF into text chunks.")
-            st.stop()
 
         embeddings = HuggingFaceEmbeddings(
             model_name="sentence-transformers/all-MiniLM-L6-v2"
@@ -92,36 +58,40 @@ if uploaded_file and st.session_state.db is None:
 
         st.session_state.db = FAISS.from_documents(texts, embeddings)
 
-    st.sidebar.success("Document ready!")
+    st.sidebar.success(" Document ready!")
 
-st.markdown("<div class='chat-container'>", unsafe_allow_html=True)
 
 for msg in st.session_state.messages:
     if msg["role"] == "user":
-        st.markdown(f"<div class='user-msg'>{msg['content']}</div>", unsafe_allow_html=True)
+        st.markdown(f" **You:** {msg['content']}")
     else:
-        st.markdown(f"<div class='bot-msg'>{msg['content']}</div>", unsafe_allow_html=True)
+        st.markdown(f" **AI:** {msg['content']}")
 
-st.markdown("</div>", unsafe_allow_html=True)
 
 
 question = st.chat_input("Ask a question about your document...")
 
 if question:
     if st.session_state.db is None:
-        st.warning("Please upload a PDF first")
+        st.warning("Upload a PDF first")
     else:
-        # Save user message
-        st.session_state.messages.append({
-            "role": "user",
-            "content": question
-        })
+        st.session_state.messages.append({"role": "user", "content": question})
 
-        # Retrieve context
-        docs = st.session_state.db.similarity_search(question, k=4)
+        
+        docs = st.session_state.db.similarity_search(question, k=2)
+
         context = " ".join([doc.page_content for doc in docs])
+        context = context[:1000]
 
+        
         prompt = f"""
+You are a document assistant.
+
+ONLY answer from the provided context.
+If the answer is not clearly in the context, say: "Not found in document".
+
+Keeping  the answer short and exact.
+
 Context:
 {context}
 
@@ -134,10 +104,9 @@ Answer:
         with st.spinner("Thinking..."):
             answer = generate_answer(prompt)
 
-        # Save assistant response
         st.session_state.messages.append({
             "role": "assistant",
-            "content": answer
+            "content": answer.strip()
         })
 
         st.rerun()
