@@ -6,19 +6,14 @@ from langchain_community.embeddings import HuggingFaceEmbeddings
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 import re
 
-
 st.set_page_config(page_title="AI PDF Chatbot", layout="wide")
+
 
 st.markdown("""
 <style>
-.main {
-    background-color: #0E1117;
-}
+.main {background-color: #0E1117;}
 
-.chat-container {
-    max-width: 800px;
-    margin: auto;
-}
+.chat-container {max-width: 800px; margin: auto;}
 
 .user-msg {
     background-color: #DCF8C6;
@@ -56,8 +51,8 @@ st.markdown("<div class='header'> AI PDF Chatbot</div>", unsafe_allow_html=True)
 
 
 def clean_text(text):
-    text = re.sub(r"\S+@\S+", "", text)  
-    text = re.sub(r"\b\d{10,}\b", "", text)  
+    text = re.sub(r"\S+@\S+", "", text)
+    text = re.sub(r"\b\d{10,}\b", "", text)
     text = re.sub(r"\n+", " ", text)
     return text.strip()
 
@@ -73,12 +68,9 @@ tokenizer, model = load_model()
 
 def generate_answer(prompt):
     inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=512)
-    outputs = model.generate(
-        **inputs,
-        max_new_tokens=120,
-        temperature=0.2  
-    )
+    outputs = model.generate(**inputs, max_new_tokens=120, temperature=0.2)
     return tokenizer.decode(outputs[0], skip_special_tokens=True)
+
 
 if "db" not in st.session_state:
     st.session_state.db = None
@@ -86,13 +78,24 @@ if "db" not in st.session_state:
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
+if "file_key" not in st.session_state:
+    st.session_state.file_key = 0   
 
-st.sidebar.header(" Upload Document")
 
-if st.sidebar.button(" Clear Chat"):
+st.sidebar.header(" Document")
+
+
+if st.sidebar.button("➕ New Chat"):
     st.session_state.messages = []
+    st.session_state.db = None
+    st.session_state.file_key += 1   
+    st.rerun()
 
-uploaded_file = st.sidebar.file_uploader("Upload PDF", type="pdf")
+uploaded_file = st.sidebar.file_uploader(
+    "Upload PDF",
+    type="pdf",
+    key=st.session_state.file_key   
+)
 
 
 if uploaded_file and st.session_state.db is None:
@@ -123,6 +126,7 @@ if uploaded_file and st.session_state.db is None:
 
     st.sidebar.success(" Document ready!")
 
+
 st.markdown("<div class='chat-container'>", unsafe_allow_html=True)
 
 for msg in st.session_state.messages:
@@ -133,18 +137,13 @@ for msg in st.session_state.messages:
 
 st.markdown("</div>", unsafe_allow_html=True)
 
-
 question = st.chat_input(" Ask a question about your document...")
-
 
 if question:
     if st.session_state.db is None:
         st.warning("Upload a PDF first")
     else:
-        st.session_state.messages.append({
-            "role": "user",
-            "content": question
-        })
+        st.session_state.messages.append({"role": "user", "content": question})
 
         docs = st.session_state.db.similarity_search(question, k=4)
 
@@ -152,13 +151,11 @@ if question:
         context = context[:1500]
 
         prompt = f"""
-
-
 Rules:
 - Answer ONLY from the context
 - If not found, say: "Not found in document"
 - Do NOT guess
-- Keep answer short and accurate
+- Keep answer short
 
 Context:
 {context}
