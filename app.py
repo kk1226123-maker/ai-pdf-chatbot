@@ -8,12 +8,15 @@ import re
 
 st.set_page_config(page_title="AI PDF Chatbot", layout="wide")
 
-
+# ---------------- UI ----------------
 st.markdown("""
 <style>
 .main {background-color: #0E1117;}
 
-.chat-container {max-width: 850px; margin: auto;}
+.chat-container {
+    max-width: 850px;
+    margin: auto;
+}
 
 .user-msg {
     background: #DCF8C6;
@@ -47,13 +50,13 @@ st.markdown("""
 
 st.markdown("<div class='header'> AI PDF Chatbot</div>", unsafe_allow_html=True)
 
-
 def clean_text(text):
     text = re.sub(r"\S+@\S+", "", text)
     text = re.sub(r"http\S+", "", text)
     text = re.sub(r"\d{8,}", "", text)
     text = re.sub(r"\s+", " ", text)
     return text.strip()
+
 
 @st.cache_resource
 def load_model():
@@ -82,7 +85,6 @@ if "messages" not in st.session_state:
 
 if "file_key" not in st.session_state:
     st.session_state.file_key = 0
-
 
 st.sidebar.header(" Document")
 
@@ -113,8 +115,8 @@ if uploaded_file and st.session_state.db is None:
             st.stop()
 
         splitter = RecursiveCharacterTextSplitter(
-            chunk_size=800,
-            chunk_overlap=150
+            chunk_size=600,
+            chunk_overlap=100
         )
 
         texts = splitter.split_documents(docs)
@@ -139,7 +141,7 @@ for msg in st.session_state.messages:
 st.markdown("</div>", unsafe_allow_html=True)
 
 
-question = st.chat_input(" Ask a question about your document...")
+question = st.chat_input("Ask a question about your document...")
 
 if question:
     if st.session_state.db is None:
@@ -151,10 +153,7 @@ if question:
         })
 
         
-        results = st.session_state.db.similarity_search_with_score(question, k=5)
-
-       
-        docs = [doc for doc, score in results if score < 0.7]
+        docs = st.session_state.db.similarity_search(question, k=3)
 
         if not docs:
             answer = "Not found in document"
@@ -162,14 +161,15 @@ if question:
             context = " ".join([clean_text(doc.page_content) for doc in docs])
             context = context[:2000]
 
+       
             prompt = f"""
-You are a highly accurate document assistant.
+You are a helpful document assistant.
 
-STRICT RULES:
-- Answer ONLY from the context
-- If not clearly present, say: "Not found in document"
-- Do NOT guess
-- Keep answer short and precise
+Answer ONLY using the context below.
+If the answer exists, extract it clearly.
+If not found, say: "Not found in document".
+
+Keep answer short and precise.
 
 Context:
 {context}
@@ -180,7 +180,7 @@ Question:
 Answer:
 """
 
-            with st.spinner(" Thinking..."):
+            with st.spinner("Thinking..."):
                 answer = generate_answer(prompt)
 
         st.session_state.messages.append({
