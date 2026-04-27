@@ -13,36 +13,34 @@ st.markdown("""
 <style>
 .main {background-color: #0E1117;}
 
-.chat-container {max-width: 800px; margin: auto;}
+.chat-container {max-width: 850px; margin: auto;}
 
 .user-msg {
-    background-color: #DCF8C6;
+    background: #DCF8C6;
     color: black;
     padding: 12px 16px;
     border-radius: 15px;
     margin: 8px 0;
-    text-align: right;
     margin-left: auto;
     max-width: 75%;
 }
 
 .bot-msg {
-    background-color: #2b2b2b;
+    background: #2b2b2b;
     color: white;
     padding: 12px 16px;
     border-radius: 15px;
     margin: 8px 0;
-    text-align: left;
     margin-right: auto;
     max-width: 75%;
 }
 
 .header {
     text-align: center;
-    font-size: 32px;
+    font-size: 34px;
     font-weight: bold;
-    margin-bottom: 20px;
     color: white;
+    margin-bottom: 20px;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -52,10 +50,10 @@ st.markdown("<div class='header'> AI PDF Chatbot</div>", unsafe_allow_html=True)
 
 def clean_text(text):
     text = re.sub(r"\S+@\S+", "", text)
-    text = re.sub(r"\b\d{10,}\b", "", text)
-    text = re.sub(r"\n+", " ", text)
+    text = re.sub(r"http\S+", "", text)
+    text = re.sub(r"\d{8,}", "", text)
+    text = re.sub(r"\s+", " ", text)
     return text.strip()
-
 
 @st.cache_resource
 def load_model():
@@ -68,7 +66,11 @@ tokenizer, model = load_model()
 
 def generate_answer(prompt):
     inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=512)
-    outputs = model.generate(**inputs, max_new_tokens=120, temperature=0.2)
+    outputs = model.generate(
+        **inputs,
+        max_new_tokens=120,
+        temperature=0.2
+    )
     return tokenizer.decode(outputs[0], skip_special_tokens=True)
 
 
@@ -79,22 +81,21 @@ if "messages" not in st.session_state:
     st.session_state.messages = []
 
 if "file_key" not in st.session_state:
-    st.session_state.file_key = 0   
+    st.session_state.file_key = 0
 
 
 st.sidebar.header(" Document")
 
-
 if st.sidebar.button("➕ New Chat"):
     st.session_state.messages = []
     st.session_state.db = None
-    st.session_state.file_key += 1   
+    st.session_state.file_key += 1
     st.rerun()
 
 uploaded_file = st.sidebar.file_uploader(
     "Upload PDF",
     type="pdf",
-    key=st.session_state.file_key   
+    key=st.session_state.file_key
 )
 
 
@@ -108,12 +109,12 @@ if uploaded_file and st.session_state.db is None:
         docs = loader.load()
 
         if not docs:
-            st.error("No readable text found in PDF.")
+            st.error(" No readable text found in PDF")
             st.stop()
 
         splitter = RecursiveCharacterTextSplitter(
-            chunk_size=600,
-            chunk_overlap=100
+            chunk_size=800,
+            chunk_overlap=150
         )
 
         texts = splitter.split_documents(docs)
@@ -137,25 +138,38 @@ for msg in st.session_state.messages:
 
 st.markdown("</div>", unsafe_allow_html=True)
 
+
 question = st.chat_input(" Ask a question about your document...")
 
 if question:
     if st.session_state.db is None:
-        st.warning("Upload a PDF first")
+        st.warning(" Upload a PDF first")
     else:
-        st.session_state.messages.append({"role": "user", "content": question})
+        st.session_state.messages.append({
+            "role": "user",
+            "content": question
+        })
 
-        docs = st.session_state.db.similarity_search(question, k=4)
+        
+        results = st.session_state.db.similarity_search_with_score(question, k=5)
 
-        context = " ".join([clean_text(doc.page_content) for doc in docs])
-        context = context[:1500]
+       
+        docs = [doc for doc, score in results if score < 0.7]
 
-        prompt = f"""
-Rules:
+        if not docs:
+            answer = "Not found in document"
+        else:
+            context = " ".join([clean_text(doc.page_content) for doc in docs])
+            context = context[:2000]
+
+            prompt = f"""
+You are a highly accurate document assistant.
+
+STRICT RULES:
 - Answer ONLY from the context
-- If not found, say: "Not found in document"
+- If not clearly present, say: "Not found in document"
 - Do NOT guess
-- Keep answer short
+- Keep answer short and precise
 
 Context:
 {context}
@@ -166,8 +180,8 @@ Question:
 Answer:
 """
 
-        with st.spinner("Thinking..."):
-            answer = generate_answer(prompt)
+            with st.spinner(" Thinking..."):
+                answer = generate_answer(prompt)
 
         st.session_state.messages.append({
             "role": "assistant",
