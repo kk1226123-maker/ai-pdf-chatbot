@@ -8,15 +8,41 @@ import re
 
 st.set_page_config(page_title="AI PDF Chatbot", layout="wide")
 
-# ---------------- UI ----------------
+
+def login():
+    st.markdown("<h2 style='text-align:center;'> Login</h2>", unsafe_allow_html=True)
+
+    users = {
+        "admin": "1234",
+        "user": "password"
+    }
+
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
+
+    if st.button("Login"):
+        if username in users and users[username] == password:
+            st.session_state.logged_in = True
+            st.session_state.username = username
+            st.success("Login successful")
+            st.rerun()
+        else:
+            st.error("Invalid username or password")
+
+
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+
+if not st.session_state.logged_in:
+    login()
+    st.stop()
+
+
 st.markdown("""
 <style>
 .main {background-color: #0E1117;}
 
-.chat-container {
-    max-width: 850px;
-    margin: auto;
-}
+.chat-container {max-width: 850px; margin: auto;}
 
 .user-msg {
     background: #DCF8C6;
@@ -50,6 +76,7 @@ st.markdown("""
 
 st.markdown("<div class='header'> AI PDF Chatbot</div>", unsafe_allow_html=True)
 
+
 def clean_text(text):
     text = re.sub(r"\S+@\S+", "", text)
     text = re.sub(r"http\S+", "", text)
@@ -69,11 +96,7 @@ tokenizer, model = load_model()
 
 def generate_answer(prompt):
     inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=512)
-    outputs = model.generate(
-        **inputs,
-        max_new_tokens=120,
-        temperature=0.2
-    )
+    outputs = model.generate(**inputs, max_new_tokens=120, temperature=0.2)
     return tokenizer.decode(outputs[0], skip_special_tokens=True)
 
 
@@ -88,10 +111,18 @@ if "file_key" not in st.session_state:
 
 st.sidebar.header(" Document")
 
+st.sidebar.write(f" Logged in as: {st.session_state.username}")
+
 if st.sidebar.button("➕ New Chat"):
     st.session_state.messages = []
     st.session_state.db = None
     st.session_state.file_key += 1
+    st.rerun()
+
+if st.sidebar.button("🚪 Logout"):
+    st.session_state.logged_in = False
+    st.session_state.messages = []
+    st.session_state.db = None
     st.rerun()
 
 uploaded_file = st.sidebar.file_uploader(
@@ -99,7 +130,6 @@ uploaded_file = st.sidebar.file_uploader(
     type="pdf",
     key=st.session_state.file_key
 )
-
 
 if uploaded_file and st.session_state.db is None:
     with st.spinner("Processing document..."):
@@ -147,12 +177,8 @@ if question:
     if st.session_state.db is None:
         st.warning(" Upload a PDF first")
     else:
-        st.session_state.messages.append({
-            "role": "user",
-            "content": question
-        })
+        st.session_state.messages.append({"role": "user", "content": question})
 
-        
         docs = st.session_state.db.similarity_search(question, k=3)
 
         if not docs:
@@ -161,15 +187,13 @@ if question:
             context = " ".join([clean_text(doc.page_content) for doc in docs])
             context = context[:2000]
 
-       
             prompt = f"""
 You are a helpful document assistant.
 
 Answer ONLY using the context below.
-If the answer exists, extract it clearly.
 If not found, say: "Not found in document".
 
-Keep answer short and precise.
+Keep answer short and clear.
 
 Context:
 {context}
