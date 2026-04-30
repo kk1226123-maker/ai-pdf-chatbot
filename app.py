@@ -1,7 +1,6 @@
 import streamlit as st
-import json
+import sqlite3
 import hashlib
-import os
 import re
 
 from langchain_community.document_loaders import PyPDFLoader
@@ -9,7 +8,6 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
-
 
 st.set_page_config(page_title="AI PDF Chatbot", layout="wide")
 
@@ -23,7 +21,7 @@ st.markdown("""
 .user-msg {
     background: #DCF8C6;
     color: black;
-    padding: 12px 16px;
+    padding: 12px;
     border-radius: 15px;
     margin: 8px 0;
     margin-left: auto;
@@ -33,7 +31,7 @@ st.markdown("""
 .bot-msg {
     background: #2b2b2b;
     color: white;
-    padding: 12px 16px;
+    padding: 12px;
     border-radius: 15px;
     margin: 8px 0;
     margin-right: auto;
@@ -42,10 +40,9 @@ st.markdown("""
 
 .header {
     text-align: center;
-    font-size: 34px;
+    font-size: 32px;
     font-weight: bold;
     color: white;
-    margin-bottom: 20px;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -53,35 +50,76 @@ st.markdown("""
 st.markdown("<div class='header'> AI PDF Chatbot</div>", unsafe_allow_html=True)
 
 
-USER_FILE = "users.json"
+def init_db():
+    conn = sqlite3.connect("users.db")
+    c = conn.cursor()
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            email TEXT PRIMARY KEY,
+            password TEXT
+        )
+    """)
+    conn.commit()
+    conn.close()
 
-def load_users():
-    if not os.path.exists(USER_FILE):
-        return {}
-    with open(USER_FILE, "r") as f:
-        return json.load(f)
-
-def save_users(users):
-    with open(USER_FILE, "w") as f:
-        json.dump(users, f)
+init_db()
 
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
 def register_user(email, password):
-    users = load_users()
-    if email in users:
+    if "@" not in email:
+        return False, "Invalid email"
+
+    conn = sqlite3.connect("users.db")
+    c = conn.cursor()
+
+    try:
+        c.execute(
+            "INSERT INTO users (email, password) VALUES (?, ?)",
+            (email, hash_password(password))
+        )
+        conn.commit()
+        return True, "Registered successfully"
+    except:
         return False, "User already exists"
-    users[email] = hash_password(password)
-    save_users(users)
-    return True, "Registered successfully"
+    finally:
+        conn.close()
 
 def login_user(email, password):
-    users = load_users()
-    if email not in users:
-        return False
-    return users[email] == hash_password(password)
+    conn = sqlite3.connect("users.db")
+    c = conn.cursor()
 
+    c.execute(
+        "SELECT * FROM users WHERE email=? AND password=?",
+        (email, hash_password(password))
+    )
+    user = c.fetchone()
+
+    conn.close()
+    return user is not None
+
+
+@st.cache_resource
+def load_model():
+    model_name = "google/flan-t5-base"
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
+    return tokenizer, model
+
+tokenizer, model = load_model()
+
+def generate_answer(prompt):
+    inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=512)
+    outputs = model.generate(**inputs, max_new_tokens=120, temperature=0.2)
+    return tokenizer.decode(outputs[0], skip_special_tokens=True)
+
+def clean_text(text):
+    text = re.sub(r"\S+@\S+", "", text)
+    text = re.sub(r"http\S+", "", text)
+    text = re.sub(r"\d{8,}", "", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
 
 if "user" not in st.session_state:
     st.session_state.user = None
@@ -106,12 +144,14 @@ if menu == "Register":
     password = st.text_input("Password", type="password")
 
     if st.button("Register"):
-        success, msg = register_user(email, password)
-        if success:
-            st.success(msg)
+        if not email or not password:
+            st.error("Enter email and password")
         else:
-            st.error(msg)
-
+            success, msg = register_user(email, password)
+            if success:
+                st.success(msg)
+            else:
+                st.error(msg)
 
 elif menu == "Login" and st.session_state.user is None:
     st.subheader("Login")
@@ -130,7 +170,7 @@ elif menu == "Login" and st.session_state.user is None:
 
 if st.session_state.user:
 
-    st.sidebar.success(f"Logged in as {st.session_state.user}")
+    st.sidebar.success(f" {st.session_state.user}")
 
     if st.sidebar.button("➕ New Chat"):
         st.session_state.messages = []
@@ -147,31 +187,6 @@ if st.session_state.user:
         type="pdf",
         key=st.session_state.file_key
     )
-
-    @st.cache_resource
-    def load_model():
-        model_name = "google/flan-t5-base"
-        tokenizer = AutoTokenizer.from_pretrained(model_name)
-        model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
-        return tokenizer, model
-
-    tokenizer, model = load_model()
-
-    def generate_answer(prompt):
-        inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=512)
-        outputs = model.generate(
-            **inputs,
-            max_new_tokens=120,
-            temperature=0.2
-        )
-        return tokenizer.decode(outputs[0], skip_special_tokens=True)
-
-    def clean_text(text):
-        text = re.sub(r"\S+@\S+", "", text)
-        text = re.sub(r"http\S+", "", text)
-        text = re.sub(r"\d{8,}", "", text)
-        text = re.sub(r"\s+", " ", text)
-        return text.strip()
 
 
     if uploaded_file and st.session_state.db is None:
@@ -232,7 +247,7 @@ if st.session_state.user:
                 context = context[:2000]
 
                 prompt = f"""
-You are a highly accurate document assistant.
+You are a document assistant.
 
 Rules:
 - Answer ONLY from context
