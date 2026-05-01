@@ -2,12 +2,14 @@ import streamlit as st
 import sqlite3
 import hashlib
 import re
+import os
 
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
+
 
 st.set_page_config(page_title="AI PDF Chatbot", layout="wide")
 
@@ -50,13 +52,16 @@ st.markdown("""
 st.markdown("<div class='header'> AI PDF Chatbot</div>", unsafe_allow_html=True)
 
 
+DB_FILE = "users.db"
+
 def init_db():
-    conn = sqlite3.connect("users.db")
+    conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute("""
         CREATE TABLE IF NOT EXISTS users (
             email TEXT PRIMARY KEY,
-            password TEXT
+            password TEXT,
+            salt TEXT
         )
     """)
     conn.commit()
@@ -64,21 +69,31 @@ def init_db():
 
 init_db()
 
-def hash_password(password):
-    return hashlib.sha256(password.encode()).hexdigest()
+
+def valid_email(email):
+    return re.match(r"^[\w\.-]+@[\w\.-]+\.\w+$", email)
+
+def strong_password(password):
+    return len(password) >= 6 and re.search(r"[A-Z]", password) and re.search(r"[0-9]", password)
+
+def hash_password(password, salt):
+    return hashlib.sha256((password + salt).encode()).hexdigest()
 
 def register_user(email, password):
-    if "@" not in email:
-        return False, "Invalid email"
+    if not valid_email(email):
+        return False, "Invalid email format"
 
-    conn = sqlite3.connect("users.db")
+    if not strong_password(password):
+        return False, "Password must be 6+ chars, include 1 number & 1 capital letter"
+
+    conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
 
+    salt = os.urandom(16).hex()
+    hashed = hash_password(password, salt)
+
     try:
-        c.execute(
-            "INSERT INTO users (email, password) VALUES (?, ?)",
-            (email, hash_password(password))
-        )
+        c.execute("INSERT INTO users VALUES (?, ?, ?)", (email, hashed, salt))
         conn.commit()
         return True, "Registered successfully"
     except:
@@ -87,39 +102,40 @@ def register_user(email, password):
         conn.close()
 
 def login_user(email, password):
-    conn = sqlite3.connect("users.db")
+    conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
 
-    c.execute(
-        "SELECT * FROM users WHERE email=? AND password=?",
-        (email, hash_password(password))
-    )
+    c.execute("SELECT password, salt FROM users WHERE email=?", (email,))
     user = c.fetchone()
-
     conn.close()
-    return user is not None
+
+    if not user:
+        return False
+
+    stored_password, salt = user
+    return stored_password == hash_password(password, salt)
 
 
 @st.cache_resource
 def load_model():
-    model_name = "google/flan-t5-base"
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
+    tokenizer = AutoTokenizer.from_pretrained("google/flan-t5-base")
+    model = AutoModelForSeq2SeqLM.from_pretrained("google/flan-t5-base")
     return tokenizer, model
 
 tokenizer, model = load_model()
 
 def generate_answer(prompt):
     inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=512)
-    outputs = model.generate(**inputs, max_new_tokens=120, temperature=0.2)
+    outputs = model.generate(**inputs, max_new_tokens=150, temperature=0.2)
     return tokenizer.decode(outputs[0], skip_special_tokens=True)
+
 
 def clean_text(text):
     text = re.sub(r"\S+@\S+", "", text)
     text = re.sub(r"http\S+", "", text)
     text = re.sub(r"\d{8,}", "", text)
-    text = re.sub(r"\s+", " ", text)
-    return text.strip()
+    return re.sub(r"\s+", " ", text).strip()
+
 
 if "user" not in st.session_state:
     st.session_state.user = None
@@ -134,27 +150,26 @@ if "file_key" not in st.session_state:
     st.session_state.file_key = 0
 
 
-menu = st.sidebar.selectbox("Menu", ["Login", "Register"])
-
+menu = st.sidebar.radio("Menu", ["Login", "Register"])
 
 if menu == "Register":
-    st.subheader("Create Account")
+    st.subheader(" Create Account")
 
     email = st.text_input("Email")
     password = st.text_input("Password", type="password")
+    confirm = st.text_input("Confirm Password", type="password")
 
     if st.button("Register"):
-        if not email or not password:
-            st.error("Enter email and password")
+        if not email or not password or not confirm:
+            st.error("All fields required")
+        elif password != confirm:
+            st.error("Passwords do not match")
         else:
             success, msg = register_user(email, password)
-            if success:
-                st.success(msg)
-            else:
-                st.error(msg)
+            st.success(msg) if success else st.error(msg)
 
 elif menu == "Login" and st.session_state.user is None:
-    st.subheader("Login")
+    st.subheader(" Login")
 
     email = st.text_input("Email")
     password = st.text_input("Password", type="password")
@@ -162,7 +177,7 @@ elif menu == "Login" and st.session_state.user is None:
     if st.button("Login"):
         if login_user(email, password):
             st.session_state.user = email
-            st.success("Logged in successfully")
+            st.success("Login successful")
             st.rerun()
         else:
             st.error("Invalid credentials")
@@ -170,7 +185,7 @@ elif menu == "Login" and st.session_state.user is None:
 
 if st.session_state.user:
 
-    st.sidebar.success(f" {st.session_state.user}")
+    st.sidebar.success(f"Logged in as {st.session_state.user}")
 
     if st.sidebar.button("➕ New Chat"):
         st.session_state.messages = []
@@ -182,12 +197,7 @@ if st.session_state.user:
         st.session_state.user = None
         st.rerun()
 
-    uploaded_file = st.sidebar.file_uploader(
-        "Upload PDF",
-        type="pdf",
-        key=st.session_state.file_key
-    )
-
+    uploaded_file = st.sidebar.file_uploader("Upload PDF", type="pdf", key=st.session_state.file_key)
 
     if uploaded_file and st.session_state.db is None:
         with st.spinner("Processing document..."):
@@ -198,36 +208,21 @@ if st.session_state.user:
             loader = PyPDFLoader("temp.pdf")
             docs = loader.load()
 
-            if not docs:
-                st.error("No readable text found")
-                st.stop()
-
-            splitter = RecursiveCharacterTextSplitter(
-                chunk_size=800,
-                chunk_overlap=150
-            )
-
+            splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=150)
             texts = splitter.split_documents(docs)
 
-            embeddings = HuggingFaceEmbeddings(
-                model_name="sentence-transformers/all-MiniLM-L6-v2"
-            )
-
+            embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
             st.session_state.db = FAISS.from_documents(texts, embeddings)
 
         st.sidebar.success("Document ready!")
 
-
     st.markdown("<div class='chat-container'>", unsafe_allow_html=True)
 
     for msg in st.session_state.messages:
-        if msg["role"] == "user":
-            st.markdown(f"<div class='user-msg'>{msg['content']}</div>", unsafe_allow_html=True)
-        else:
-            st.markdown(f"<div class='bot-msg'>{msg['content']}</div>", unsafe_allow_html=True)
+        style = "user-msg" if msg["role"] == "user" else "bot-msg"
+        st.markdown(f"<div class='{style}'>{msg['content']}</div>", unsafe_allow_html=True)
 
     st.markdown("</div>", unsafe_allow_html=True)
-
 
     question = st.chat_input("Ask a question about your document...")
 
@@ -238,21 +233,16 @@ if st.session_state.user:
             st.session_state.messages.append({"role": "user", "content": question})
 
             results = st.session_state.db.similarity_search_with_score(question, k=5)
-            docs = [doc for doc, score in results if score < 0.7]
+            docs = [doc for doc, score in results if score < 0.8]
 
             if not docs:
                 answer = "Not found in document"
             else:
-                context = " ".join([clean_text(doc.page_content) for doc in docs])
-                context = context[:2000]
+                context = " ".join([clean_text(doc.page_content) for doc in docs])[:2000]
 
                 prompt = f"""
-You are a document assistant.
-
-Rules:
-- Answer ONLY from context
-- If not found say: Not found in document
-- Keep answer short
+Answer ONLY using the context below.
+If answer not found, say: Not found in document.
 
 Context:
 {context}
@@ -266,13 +256,8 @@ Answer:
                 with st.spinner("Thinking..."):
                     answer = generate_answer(prompt)
 
-            st.session_state.messages.append({
-                "role": "assistant",
-                "content": answer.strip()
-            })
-
+            st.session_state.messages.append({"role": "assistant", "content": answer})
             st.rerun()
-
 
 else:
     st.warning("Please login to use the chatbot")
