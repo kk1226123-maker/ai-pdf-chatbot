@@ -13,7 +13,6 @@ from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 
 st.set_page_config(page_title="AI PDF Chatbot", layout="wide")
 
-
 st.markdown("""
 <style>
 .main {background-color: #0E1117;}
@@ -81,10 +80,10 @@ def hash_password(password, salt):
 
 def register_user(email, password):
     if not valid_email(email):
-        return False, "Invalid email format"
+        return False, "Invalid email"
 
     if not strong_password(password):
-        return False, "Password must be 6+ chars, include 1 number & 1 capital letter"
+        return False, "Password must have capital letter & number"
 
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
@@ -126,9 +125,8 @@ tokenizer, model = load_model()
 
 def generate_answer(prompt):
     inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=512)
-    outputs = model.generate(**inputs, max_new_tokens=150, temperature=0.2)
+    outputs = model.generate(**inputs, max_new_tokens=200, temperature=0.3)
     return tokenizer.decode(outputs[0], skip_special_tokens=True)
-
 
 def clean_text(text):
     text = re.sub(r"\S+@\S+", "", text)
@@ -149,11 +147,10 @@ if "messages" not in st.session_state:
 if "file_key" not in st.session_state:
     st.session_state.file_key = 0
 
-
 menu = st.sidebar.radio("Menu", ["Login", "Register"])
 
 if menu == "Register":
-    st.subheader(" Create Account")
+    st.subheader("Create Account")
 
     email = st.text_input("Email")
     password = st.text_input("Password", type="password")
@@ -169,7 +166,7 @@ if menu == "Register":
             st.success(msg) if success else st.error(msg)
 
 elif menu == "Login" and st.session_state.user is None:
-    st.subheader(" Login")
+    st.subheader("Login")
 
     email = st.text_input("Email")
     password = st.text_input("Password", type="password")
@@ -185,7 +182,7 @@ elif menu == "Login" and st.session_state.user is None:
 
 if st.session_state.user:
 
-    st.sidebar.success(f"Logged in as {st.session_state.user}")
+    st.sidebar.success(f"{st.session_state.user}")
 
     if st.sidebar.button("➕ New Chat"):
         st.session_state.messages = []
@@ -199,6 +196,7 @@ if st.session_state.user:
 
     uploaded_file = st.sidebar.file_uploader("Upload PDF", type="pdf", key=st.session_state.file_key)
 
+ 
     if uploaded_file and st.session_state.db is None:
         with st.spinner("Processing document..."):
 
@@ -208,14 +206,22 @@ if st.session_state.user:
             loader = PyPDFLoader("temp.pdf")
             docs = loader.load()
 
-            splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=150)
+            splitter = RecursiveCharacterTextSplitter(
+                chunk_size=1000,
+                chunk_overlap=200
+            )
+
             texts = splitter.split_documents(docs)
 
-            embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+            embeddings = HuggingFaceEmbeddings(
+                model_name="sentence-transformers/all-MiniLM-L6-v2"
+            )
+
             st.session_state.db = FAISS.from_documents(texts, embeddings)
 
         st.sidebar.success("Document ready!")
 
+   
     st.markdown("<div class='chat-container'>", unsafe_allow_html=True)
 
     for msg in st.session_state.messages:
@@ -224,6 +230,7 @@ if st.session_state.user:
 
     st.markdown("</div>", unsafe_allow_html=True)
 
+   
     question = st.chat_input("Ask a question about your document...")
 
     if question:
@@ -232,17 +239,28 @@ if st.session_state.user:
         else:
             st.session_state.messages.append({"role": "user", "content": question})
 
-            results = st.session_state.db.similarity_search_with_score(question, k=5)
-            docs = [doc for doc, score in results if score < 0.8]
+            
+            docs = st.session_state.db.similarity_search(question, k=6)
 
-            if not docs:
+            context = " ".join([clean_text(doc.page_content) for doc in docs])
+
+        
+            if question.lower() not in context.lower():
+                matched = []
+                for doc in docs:
+                    if any(word in doc.page_content.lower() for word in question.lower().split()):
+                        matched.append(doc.page_content)
+                if matched:
+                    context = " ".join(matched)
+
+            context = context[:3000]
+
+            if not context.strip():
                 answer = "Not found in document"
             else:
-                context = " ".join([clean_text(doc.page_content) for doc in docs])[:2000]
-
                 prompt = f"""
-Answer ONLY using the context below.
-If answer not found, say: Not found in document.
+Answer the question using ONLY the context.
+Be flexible with wording.
 
 Context:
 {context}
