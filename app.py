@@ -10,7 +10,6 @@ from langchain_community.vectorstores import FAISS
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 
-
 st.set_page_config(page_title="AI PDF Chatbot", layout="wide")
 
 st.markdown("""
@@ -49,7 +48,6 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.markdown("<div class='header'> AI PDF Chatbot</div>", unsafe_allow_html=True)
-
 
 DB_FILE = "users.db"
 
@@ -128,6 +126,7 @@ def generate_answer(prompt):
     outputs = model.generate(**inputs, max_new_tokens=200, temperature=0.3)
     return tokenizer.decode(outputs[0], skip_special_tokens=True)
 
+
 def clean_text(text):
     text = re.sub(r"\S+@\S+", "", text)
     text = re.sub(r"http\S+", "", text)
@@ -196,7 +195,7 @@ if st.session_state.user:
 
     uploaded_file = st.sidebar.file_uploader("Upload PDF", type="pdf", key=st.session_state.file_key)
 
- 
+
     if uploaded_file and st.session_state.db is None:
         with st.spinner("Processing document..."):
 
@@ -221,7 +220,7 @@ if st.session_state.user:
 
         st.sidebar.success("Document ready!")
 
-   
+  
     st.markdown("<div class='chat-container'>", unsafe_allow_html=True)
 
     for msg in st.session_state.messages:
@@ -230,7 +229,7 @@ if st.session_state.user:
 
     st.markdown("</div>", unsafe_allow_html=True)
 
-   
+
     question = st.chat_input("Ask a question about your document...")
 
     if question:
@@ -239,12 +238,11 @@ if st.session_state.user:
         else:
             st.session_state.messages.append({"role": "user", "content": question})
 
-            
+       
             docs = st.session_state.db.similarity_search(question, k=6)
 
             context = " ".join([clean_text(doc.page_content) for doc in docs])
 
-        
             if question.lower() not in context.lower():
                 matched = []
                 for doc in docs:
